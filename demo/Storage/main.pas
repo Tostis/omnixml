@@ -9,6 +9,7 @@ uses
   StdCtrls, ExtCtrls,
   OmniXML, OmniXML_Types,
   PropFormatAttributeUnit,
+  ElementNameAttributeUnit,
 {$IFDEF USE_MSXML}
   OmniXML_MSXML,
 {$ENDIF}
@@ -49,7 +50,10 @@ type
 
   TMyXML = class(TPersistent)
   private
+    FpropNamespace01: string;
+    FpropNamespace02: string;
     FpropString: string;
+    FpropStringFoo: string;
     FpropAnsiString: AnsiString;
     FpropShortString: ShortString;
     FpropUTF8String: UTF8String;
@@ -81,6 +85,14 @@ type
     constructor Create;
     destructor Destroy; override;
   published
+    [PropFormat(true)]
+    [ElementName('xmlns:xsl')]
+    property propNamespace01: string read FpropNamespace01 write FpropNamespace01;
+    [PropFormat(true)]
+    [ElementName('xmlns:xxx')]
+    property propNamespace02: string read FpropNamespace02 write FpropNamespace02;
+    [ElementName('baz')]
+    property propStringFoo: string read FpropStringFoo write FpropStringFoo;
     [PropFormat(true)]
     property propString: string read FpropString write FpropString;
     property propAnsiString: AnsiString read FpropAnsiString write FpropAnsiString;
@@ -119,7 +131,6 @@ type
     Label10: TLabel;
     Bevel1: TBevel;
     Label1: TLabel;
-    rgPropsFormat: TRadioGroup;
     rgOutputFormat: TRadioGroup;
     Bevel2: TBevel;
     Label11: TLabel;
@@ -226,6 +237,9 @@ begin
   PX.propClass.propFloatAttr := 32/15;
   PX.propClass_ReadOnly.propFloat := 22/7;
   PX.propString := ExampleText.SampleString;
+  PX.propNamespace01 := 'http://www.w3.org/1999/XSL/Transform';
+  PX.propNamespace02 := 'http://www.sample.org/2024';
+  PX.propStringFoo := 'Bar';
   PX.propAnsiString := AnsiString(ExampleText.SampleString);
   PX.propShortString := ShortString(ExampleText.SampleString);
   PX.propUTF8String := UTF8String(ExampleText.SampleString);
@@ -266,11 +280,9 @@ end;
 procedure TfMain.bWriteToFileClick(Sender: TObject);
 begin
   // first we save PX (custom TPersistent class)
-  TOmniXMLWriter.SaveToFile(PX, DocPath + 'storage_PX.xml',
-    TPropsFormat(rgPropsFormat.ItemIndex + 1), TOutputFormat(rgOutputFormat.ItemIndex));
+  TOmniXMLWriter.SaveToFile(PX, DocPath + 'storage_PX.xml', TOutputFormat(rgOutputFormat.ItemIndex));
   // then, we save Self (TForm class)
-  TOmniXMLWriter.SaveToFile(Self, DocPath + 'storage_form.xml',
-    TPropsFormat(rgPropsFormat.ItemIndex + 1), TOutputFormat(rgOutputFormat.ItemIndex));
+  TOmniXMLWriter.SaveToFile(Self, DocPath + 'storage_form.xml', TOutputFormat(rgOutputFormat.ItemIndex));
 end;
 
 procedure TfMain.bLoadFromFileClick(Sender: TObject);
@@ -279,8 +291,7 @@ begin
   PX := TMyXML.Create;
 
   TOmniXMLReader.LoadFromFile(PX, DocPath + 'storage_PX.xml');
-  TOmniXMLWriter.SaveToFile(PX, DocPath + 'storage_PX_resaved.xml',
-    TPropsFormat(rgPropsFormat.ItemIndex + 1), TOutputFormat(rgOutputFormat.ItemIndex));
+  TOmniXMLWriter.SaveToFile(PX, DocPath + 'storage_PX_resaved.xml', TOutputFormat(rgOutputFormat.ItemIndex));
 end;
 
 initialization
