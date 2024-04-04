@@ -8,6 +8,7 @@ uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
   StdCtrls, ExtCtrls,
   OmniXML, OmniXML_Types,
+  PropFormatAttributeUnit,
 {$IFDEF USE_MSXML}
   OmniXML_MSXML,
 {$ENDIF}
@@ -25,8 +26,11 @@ type
   TStandaloneClass = class(TPersistent)
   private
     FpropFloat: Double;
+    FpropFloatAttr: Double;
   published
     property propFloat: Double read FpropFloat write FpropFloat;
+    [PropFormat(true)]
+    property propFloatAttr: Double read FpropFloatAttr write FpropFloatAttr;
   end;
 
   TChildClass = class(TCollectionItem)
@@ -77,6 +81,7 @@ type
     constructor Create;
     destructor Destroy; override;
   published
+    [PropFormat(true)]
     property propString: string read FpropString write FpropString;
     property propAnsiString: AnsiString read FpropAnsiString write FpropAnsiString;
     property propShortString: ShortString read FpropShortString write FpropShortString;
@@ -218,6 +223,7 @@ begin
   DocPath := ExtractFilePath(ExpandFileName(ExtractFilePath(Application.ExeName) + '..\doc\dummy.xml'));
   PX := TMyXML.Create;
   PX.propClass.propFloat := 32/11;
+  PX.propClass.propFloatAttr := 32/15;
   PX.propClass_ReadOnly.propFloat := 22/7;
   PX.propString := ExampleText.SampleString;
   PX.propAnsiString := AnsiString(ExampleText.SampleString);
