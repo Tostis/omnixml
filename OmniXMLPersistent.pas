@@ -112,10 +112,9 @@ const
 var
   PropFormatValues: array[TPropsFormat] of string = ('auto', 'attr', 'node');
 
-function IsElementEmpty(Element: IXMLElement; PropsFormat: TPropsFormat): Boolean;
+function IsElementEmpty(Element: IXMLElement): Boolean;
 begin
-  Result := ((PropsFormat = pfAttributes) and (Element.Attributes.Length = 0)) or
-    ((PropsFormat = pfNodes) and (Element.ChildNodes.Length = 0));
+  Result := (Element.Attributes.Length = 0) and (Element.ChildNodes.Length = 0);
 end;
 
 procedure CreateDocument(var XMLDoc: IXMLDocument; var Root: IXMLElement;
@@ -347,8 +346,7 @@ var
     Value: Real;
   begin
     Value := GetFloatProp(Instance, PropInfo);
-    if (Value <> 0) or (WriteDefaultValues) then
-      InternalWriteText(Element, Name, XMLRealToStr(Value), PropFormat);
+    InternalWriteText(Element, Name, XMLRealToStr(Value), PropFormat);
   end;
 
   procedure WriteDateTimeProp;
@@ -365,8 +363,7 @@ var
     Value: Int64;
   begin
     Value := GetInt64Prop(Instance, PropInfo);
-    if (Value <> 0) or (WriteDefaultValues) then
-      InternalWriteText(Element, Name, XMLInt64ToStr(Value), PropFormat);
+    InternalWriteText(Element, Name, XMLInt64ToStr(Value), PropFormat);
   end;
 
   procedure WriteObjectProp;
@@ -471,7 +468,7 @@ begin
   util.Free();
 
   if WriteRoot then begin
-    if CheckIfEmpty and IsElementEmpty(Element, pfNodes) then
+    if CheckIfEmpty and IsElementEmpty(Element) then
       Exit
     else begin
       if Root <> nil then
