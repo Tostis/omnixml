@@ -36,6 +36,7 @@ uses
   OEncoding, OmniXML, OmniXML_Types,
 {$IFDEF USE_MSXML} OmniXML_MSXML, {$ENDIF}
   System.Rtti,
+  System.Generics.Collections,
   PropFormatAttributeUnit,
   ElementNameAttributeUnit,
   OmniXMLUtils;
@@ -56,6 +57,8 @@ type TOmnyXMLUtil = class
 
   public function GetElementPropFormat(Instance: TObject; PropInfo: PPropInfo): TPropsFormat;
   public function GetElementCustomName(Instance: TObject; PropInfo: PPropInfo): string;
+  public function GetRootName(Instance: TObject): string;
+  public function GetSubTypeItemClassFromList(ObjectList: TObject): TClass;
 end;
 
 
@@ -79,6 +82,7 @@ type
   TOmniXMLReader = class
   protected
     function FindElement(const Root: IXMLElement; const TagName: XmlString): IXMLElement;
+    function FindAllElements(const Root: IXMLElement; const TagName: XmlString): TList<IXMLElement>;
     procedure ReadProperty(Instance: TPersistent; PropInfo: Pointer; Element: IXMLElement;
     const PropFormat: TPropsFormat = pfNodes);
     function InternalReadText(Root: IXMLElement; Name: XmlString; var Value: XmlString;
@@ -117,47 +121,41 @@ begin
   Result := (Element.Attributes.Length = 0) and (Element.ChildNodes.Length = 0);
 end;
 
-procedure CreateDocument(var XMLDoc: IXMLDocument; var Root: IXMLElement;
-  RootNodeName: XmlString);
+procedure CreateDocument(var XMLDoc: IXMLDocument; var Root: IXMLElement; RootNodeName: XmlString);
 begin
   XMLDoc := CreateXMLDoc;
   XMLDoc.AppendChild(XMLDoc.CreateProcessingInstruction('xml', 'version="1.0" encoding="utf-8"'));
-  Root := XMLDoc.CreateElement(RootNodeName);
-  XMLDoc.DocumentElement := Root;
+  if RootNodeName<>'' then
+  begin
+    Root := XMLDoc.CreateElement(RootNodeName);
+    XMLDoc.DocumentElement := Root;
+  end
+  else
+  begin
+    Root:= XMLDoc.DocumentElement;
+  end;
 end;
 
-procedure Load(var XMLDoc: IXMLDocument; var XMLRoot: IXMLElement;
-  var PropsFormat: TPropsFormat);
+procedure Load(var XMLDoc: IXMLDocument; var XMLRoot: IXMLElement);
 var
   i: TPropsFormat;
   PropFormatValue: XmlString;
 begin
   // set root element
   XMLRoot := XMLDoc.documentElement;
-  PropsFormat := pfNodes;
 
   if XMLRoot = nil then
     Exit;
-
-  PropFormatValue := XMLRoot.GetAttribute(PROP_FORMAT);
-
-  for i := Low(TPropsFormat) to High(TPropsFormat) do begin
-    if SameText(PropFormatValue, PropFormatValues[i]) then begin
-      PropsFormat := i;
-      Break;
-    end;
-  end;
 end;
 
-procedure LoadDocument(const FileName: string; var XMLDoc: IXMLDocument;
-  var XMLRoot: IXMLElement; var PropsFormat: TPropsFormat);
+procedure LoadDocument(const FileName: string; var XMLDoc: IXMLDocument; var XMLRoot: IXMLElement);
 begin
   XMLDoc := CreateXMLDoc;
   { TODO : implement and test preserveWhiteSpace }
   XMLDoc.preserveWhiteSpace := True;
   XMLDoc.Load(FileName);
 
-  Load(XMLDoc, XMLRoot, PropsFormat);
+  Load(XMLDoc, XMLRoot);
 end;
 
 { TOmniXMLWriter }
@@ -170,16 +168,24 @@ var
   Writer: TOmniXMLWriter;
 begin
   if Instance is TCollection then
-    CreateDocument(XMLDoc, Root, Instance.ClassName)
+  begin
+    CreateDocument(XMLDoc, Root, Instance.ClassName);
+  end
   else
-    CreateDocument(XMLDoc, Root, 'data');
+  begin
+    CreateDocument(XMLDoc, Root, '');
+  end;
 
   Writer := TOmniXMLWriter.Create(XMLDoc);
   try
     if Instance is TCollection then
-      Writer.WriteCollection(TCollection(Instance), Root)
+    begin
+      Writer.WriteCollection(TCollection(Instance), Root);
+    end
     else
+    begin
       Writer.Write(Instance, Root);
+    end;
   finally
     Writer.Free;
   end;
@@ -282,6 +288,46 @@ begin
 
 end;
 
+function TOmnyXMLUtil.GetRootName(Instance: TObject): string;
+begin
+  result:= Instance.ClassName;
+
+  var objType: TRttiType:= ctx.GetType(Instance.ClassInfo);
+  var LAttr: TCustomAttribute;
+  for LAttr in objType.GetAttributes() do
+  begin
+    if Lattr.ClassInfo = TypeInfo(ElementNameAttribute) then
+    begin
+      result:= ElementNameAttribute(LAttr).GetName();
+      break;
+    end;
+  end;
+
+end;
+
+function TOmnyXMLUtil.GetSubTypeItemClassFromList(ObjectList: TObject): TClass;
+var
+  typeRtti : TRttiType;
+  atrbRtti : TCustomAttribute;
+  methodRtti: TRttiMethod;
+  parameterRtti: TRttiParameter;
+begin
+  result := nil;
+
+  typeRtti := ctx.GetType( ObjectList.ClassType );
+  methodRtti := typeRtti.GetMethod('Add');
+  for parameterRtti in methodRtti.GetParameters do
+  begin
+    if SameText(parameterRtti.Name,'Value') then
+    begin
+      if parameterRtti.ParamType.IsInstance then
+        result := parameterRtti.ParamType.AsInstance.MetaclassType;
+      break;
+    end;
+  end;
+end;
+
+
 procedure TOmniXMLWriter.WriteCollection(Collection: TCollection; Root: IXMLElement);
 var
   i: Integer;
@@ -383,23 +429,43 @@ var
     end;
   begin
     Value := TObject(GetOrdProp(Instance, PropInfo));
-    if (Value <> nil) and (Value is TPersistent) then begin
-      PropNode := Doc.CreateElement(Name);
+    if (Value <> nil) then
+    begin
+      if (Value is TPersistent) then
+      begin
+        PropNode := Doc.CreateElement(Name);
 
-      // write object's properties
-      Write(TPersistent(Value), PropNode, False, True, WriteDefaultValues);
-      if Value is TCollection then begin
-        WriteCollection(TCollection(Value), PropNode);
-        if not IsElementEmpty(PropNode, pfNodes) then
+        // write object's properties
+        Write(TPersistent(Value), PropNode, False, True, WriteDefaultValues);
+        if Value is TCollection then begin
+          WriteCollection(TCollection(Value), PropNode);
+          if not IsElementEmpty(PropNode) then
+            Element.AppendChild(PropNode);
+        end
+        else if Value is TStrings then begin
+          WriteStrings(TStrings(Value));
+          Element.AppendChild(PropNode);
+        end
+        else if not IsElementEmpty(PropNode) then
           Element.AppendChild(PropNode);
       end
-      else if Value is TStrings then begin
-        WriteStrings(TStrings(Value));
-        Element.AppendChild(PropNode);
-      end
-      else if not IsElementEmpty(PropNode, PropFormat) then
-        Element.AppendChild(PropNode);
+      else if (Value.ClassName.StartsWith('TObjectList<')) then // TODO ugly
+      begin
+        // write a xml tag for every occurrence
+        var ValueList: TObjectList<TPersistent> := TObjectList<TPersistent>(Value) ;
+        for var i:integer := 0 to ValueList.Count-1 do
+        begin
+          var PropNodeX: IXMLElement := Doc.CreateElement(Name);
+          Write(TPersistent(ValueList[i]), PropNodeX, False, True, WriteDefaultValues);
+          Element.AppendChild(PropNodeX);
+        end;
+      end;
+
     end;
+
+
+
+
   end;
 
 begin
@@ -438,16 +504,25 @@ begin
   if PropCount = 0 then
     Exit;
 
+  var util: TOmnyXMLUtil:= TOmnyXMLUtil.Create();
+
   if Instance is TCollectionItem then
-    Element := Doc.CreateElement(COLLECTIONITEM_NODENAME)
+  begin
+    Element := Doc.CreateElement(COLLECTIONITEM_NODENAME);
+  end
   else if WriteRoot then
-    Element := Doc.CreateElement(Instance.ClassName)
+  begin
+    var RootName: string := util.GetRootName(Instance);
+    Element := Doc.CreateElement(RootName);
+  end
   else
+  begin
     Element := Root;
+  end;
 
   GetMem(PropList, PropCount * SizeOf(Pointer));
 
-  var util: TOmnyXMLUtil:= TOmnyXMLUtil.Create();
+
 
   try
     GetPropInfos(Instance.ClassInfo, PropList);
@@ -486,14 +561,13 @@ var
   XMLDoc: IXMLDocument;
   XMLRoot: IXMLElement;
   Reader: TOmniXMLReader;
-  PropsFormat: TPropsFormat;
 begin
   XMLDoc := CreateXMLDoc;
   { TODO : implement and test preserveWhiteSpace }
   XMLDoc.preserveWhiteSpace := True;
   XMLDoc.LoadXML(XML);
 
-  Load(XMLDoc, XMLRoot, PropsFormat);
+  Load(XMLDoc, XMLRoot);
 
   Reader := TOmniXMLReader.Create();
   try
@@ -511,17 +585,16 @@ var
   XMLDoc: IXMLDocument;
   XMLRoot: IXMLElement;
   Reader: TOmniXMLReader;
-  PropsFormat: TPropsFormat;
 begin
   // read document
-  LoadDocument(FileName, XMLDoc, XMLRoot, PropsFormat);
+  LoadDocument(FileName, XMLDoc, XMLRoot);
 
   Reader := TOmniXMLReader.Create();
   try
     if Instance is TCollection then
       Reader.ReadCollection(TCollection(Instance), XMLRoot)
     else
-      Reader.Read(Instance, XMLRoot, True);
+      Reader.Read(Instance, XMLRoot, False);
   finally
     Reader.Free;
   end;
@@ -532,10 +605,9 @@ var
   XMLDoc: IXMLDocument;
   XMLRoot: IXMLElement;
   Reader: TOmniXMLReader;
-  PropsFormat: TPropsFormat;
 begin
   // read document
-  LoadDocument(FileName, XMLDoc, XMLRoot, PropsFormat);
+  LoadDocument(FileName, XMLDoc, XMLRoot);
 
   Reader := TOmniXMLReader.Create();
   try
@@ -564,6 +636,20 @@ begin
         Result := Root.ChildNodes.Item[i] as IXMLElement
     else
       Inc(i);
+  end;
+end;
+
+function TOmniXMLReader.FindAllElements(const Root: IXMLElement; const TagName: XmlString): TList<IXMLElement>;
+begin
+  Result := nil;
+  if Root = nil then
+    Exit();
+  Result := TList<IXMLElement>.Create();
+  for var i:integer:=0 to Root.ChildNodes.Length-1 do
+  begin
+    if (Root.ChildNodes.Item[i].NodeType = ELEMENT_NODE)
+      and (CompareText(Root.ChildNodes.Item[i].NodeName, TagName) = 0) then
+        Result.Add(Root.ChildNodes.Item[i] as IXMLElement)
   end;
 end;
 
@@ -767,13 +853,37 @@ var
     end;
   begin
     Value := TObject(GetOrdProp(Instance, PropInfo));
-    if (Value <> nil) and (Value is TPersistent) then begin
-      PropNode := FindElement(Element, Name);
-      Read(TPersistent(Value), PropNode);
-      if Value is TCollection then
-        ReadCollection(TCollection(Value), PropNode)
-      else if Value is TStrings then
-        ReadStrings(TStrings(Value));
+    if (Value <> nil) then
+    begin
+      if (Value is TPersistent) then
+      begin
+        PropNode := FindElement(Element, Name);
+        Read(TPersistent(Value), PropNode);
+        if Value is TCollection then
+          ReadCollection(TCollection(Value), PropNode)
+        else if Value is TStrings then
+          ReadStrings(TStrings(Value));
+      end;
+
+      if (Value.ClassName.StartsWith('TObjectList<')) then // TODO ugly
+      begin
+        // TODO matrix not supported
+        var ValueList: TObjectList<TPersistent> := TObjectList<TPersistent>(Value);
+        var PropNodeList: TList<IXMLElement> := FindAllElements(Element, Name);
+
+        var util: TOmnyXMLUtil:= TOmnyXMLUtil.Create();
+
+        for var i:integer := 0 to PropNodeList.Count-1 do
+        begin
+          PropNode:= PropNodeList[i];
+
+          ValueList.Add(util.GetSubTypeItemClassFromList(ValueList).Create() as TPersistent);
+          Read(TPersistent(ValueList[i]), PropNode);
+        end;
+        util.Free();
+      end;
+
+
     end;
   end;
 
@@ -809,18 +919,20 @@ var
   i: Integer;
   PropInfo: PPropInfo;
 begin
+  var util: TOmnyXMLUtil:= TOmnyXMLUtil.Create();
   if ReadRoot then
-    Root := FindElement(Root, Instance.ClassName);
+    Root := FindElement(Root, util.GetRootName(Instance));
 
   if Root = nil then
-    Exit;
-
+  begin
+    util.Free();
+    Exit();
+  end;
   PropCount := GetTypeData(Instance.ClassInfo)^.PropCount;
   if PropCount > 0 then begin
     GetMem(PropList, PropCount * SizeOf(Pointer));
     try
       GetPropInfos(Instance.ClassInfo, PropList);
-      var util: TOmnyXMLUtil:= TOmnyXMLUtil.Create();
       for i := 0 to PropCount - 1 do begin
         PropInfo := PropList^[I];
         if PropInfo = nil then
@@ -829,11 +941,12 @@ begin
         var PropFormat: TPropsFormat := util.GetElementPropFormat(Instance, PropInfo);
         ReadProperty(Instance, PropInfo, Root, PropFormat);
       end;
-      util.Free();
+
     finally
       FreeMem(PropList, PropCount * SizeOf(Pointer));
     end;
   end;
+  util.Free();
 end;
 
 end.

@@ -10,6 +10,7 @@ uses
   OmniXML, OmniXML_Types,
   PropFormatAttributeUnit,
   ElementNameAttributeUnit,
+  System.Generics.Collections,
 {$IFDEF USE_MSXML}
   OmniXML_MSXML,
 {$ENDIF}
@@ -48,6 +49,14 @@ type
     property curDate: TDateTime read FCurDate write FCurDate;
   end;
 
+  TWrongClass = class
+  private
+    FpropFloat: Double;
+  published
+    property propFloat: Double read FpropFloat write FpropFloat;
+  end;
+
+  [ElementName('myRoot')]
   TMyXML = class(TPersistent)
   private
     FpropNamespace01: string;
@@ -81,6 +90,10 @@ type
     FpropDateTime: TDateTime;
     FpropEmptyDateTime: TDateTime;
     FpropStringList: TStringList;
+    FpropClassList: TObjectList<TStandaloneClass>;
+    FpropWrongClassList: TObjectList<TWrongClass>;
+    // TODO matrix not supported
+    FpropClassMatrix: TObjectList<TObjectList<TStandaloneClass>>;
   public
     constructor Create;
     destructor Destroy; override;
@@ -91,7 +104,7 @@ type
     [PropFormat(true)]
     [ElementName('xmlns:xxx')]
     property propNamespace02: string read FpropNamespace02 write FpropNamespace02;
-    [ElementName('baz')]
+    [ElementName('xxx:baz')]
     property propStringFoo: string read FpropStringFoo write FpropStringFoo;
     [PropFormat(true)]
     property propString: string read FpropString write FpropString;
@@ -122,6 +135,10 @@ type
     property propDateTime: TDateTime read FpropDateTime write FpropDateTime;
     property propEmptyDateTime: TDateTime read FpropEmptyDateTime write FpropEmptyDateTime;
     property propStringList: TStringList read FpropStringList write FpropStringList;
+    property propClassList: TObjectList<TStandaloneClass> read FpropClassList write FpropClassList;
+    property propClassMatrix: TObjectList<TObjectList<TStandaloneClass>> read FpropClassMatrix write FpropClassMatrix;
+    // not serialized because TWrongClass does not extend TPersistent
+    property propWrongClassList: TObjectList<TWrongClass> read FpropWrongClassList write FpropWrongClassList;
   end;
 
   TfMain = class(TForm)
@@ -197,10 +214,14 @@ begin
   propClass := TStandaloneClass.Create;
   FpropClass_ReadOnly := TStandaloneClass.Create;
   propStringList := TStringList.Create;
+  propClassList := TObjectList<TStandaloneClass>.Create();
+  propClassMatrix := TObjectList<TObjectList<TStandaloneClass>>.Create();
 end;
 
 destructor TMyXML.Destroy;
 begin
+  propClassMatrix.Free;
+  propClassList.Free;
   propStringList.Free;
   FreeAndNil(FpropClass_ReadOnly);
   propClass.Free;
@@ -265,6 +286,29 @@ begin
   PX.propStringList.Add('');
   PX.propStringList.Add('line 3');
   PX.propStringList.Delimiter := ';';
+
+  var cl01: TStandaloneClass := TStandaloneClass.Create();
+  cl01.FpropFloat:= 50;
+  var cl02: TStandaloneClass := TStandaloneClass.Create();
+  cl02.FpropFloatAttr:= 25.6;
+
+  PX.propClassList.Add(cl01);
+  PX.propClassList.Add(cl02);
+
+
+//  for var j:integer := 0 to 3 do
+//  begin
+//    var listJ: TObjectList<TStandaloneClass> := TObjectList<TStandaloneClass>.Create();
+//    for var k:integer := 0 to 4 do
+//    begin
+//        var classjk: TStandaloneClass := TStandaloneClass.Create();
+//        classjk.FpropFloat:= 50*j*k;
+//        classjk.FpropFloatAttr:= 25.6*j*k;
+//        listJ.Add(classjk);
+//    end;
+//    PX.propClassMatrix.Add(listJ);
+//  end;
+
 
   PX.propList.curDate := Now;
   TChildClass(PX.propList.Add).propFloat := 23/7;
