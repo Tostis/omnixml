@@ -11,6 +11,7 @@ uses
   PropFormatAttributeUnit,
   ElementNameAttributeUnit,
   System.Generics.Collections,
+  Spring.Collections,
 {$IFDEF USE_MSXML}
   OmniXML_MSXML,
 {$ENDIF}
@@ -56,6 +57,21 @@ type
     property propFloat: Double read FpropFloat write FpropFloat;
   end;
 
+  ISomeInterface = interface
+    function getFloat(): double;
+    procedure setFloat(theFloat: double);
+  end;
+
+  TInterfacedClass = class(TInterfacedPersistent, ISomeInterface)
+    private Ffloat: double;
+
+    public function getFloat(): double;
+    public procedure setFloat(theFloat: double);
+
+    published property profFloat: double read getFloat write setFloat;
+  end;
+
+
   [ElementName('myRoot')]
   TMyXML = class(TPersistent)
   private
@@ -92,7 +108,9 @@ type
     FpropStringList: TStringList;
     FpropClassList: TObjectList<TStandaloneClass>;
     FpropWrongClassList: TObjectList<TWrongClass>;
-    // TODO matrix not supported
+    FpropSomeInterface: ISomeInterface;
+    FpropSomeInterfaceList: IList<ISomeInterface>;
+    // TODO
     FpropClassMatrix: TObjectList<TObjectList<TStandaloneClass>>;
   public
     constructor Create;
@@ -137,6 +155,8 @@ type
     property propStringList: TStringList read FpropStringList write FpropStringList;
     property propClassList: TObjectList<TStandaloneClass> read FpropClassList write FpropClassList;
     property propClassMatrix: TObjectList<TObjectList<TStandaloneClass>> read FpropClassMatrix write FpropClassMatrix;
+    property propSomeInterface: ISomeInterface read FpropSomeInterface write FpropSomeInterface;
+    property propSomeInterfaceList: IList<ISomeInterface> read FpropSomeInterfaceList write FpropSomeInterfaceList;
     // not serialized because TWrongClass does not extend TPersistent
     property propWrongClassList: TObjectList<TWrongClass> read FpropWrongClassList write FpropWrongClassList;
   end;
@@ -210,6 +230,8 @@ end;
 constructor TMyXML.Create;
 begin
   inherited;
+  propSomeInterfaceList := TCollections.CreateList<ISomeInterface>();
+  propSomeInterface := TInterfacedClass.create();
   propList := TPropList.Create(TChildClass);
   propClass := TStandaloneClass.Create;
   FpropClass_ReadOnly := TStandaloneClass.Create;
@@ -295,6 +317,16 @@ begin
   PX.propClassList.Add(cl01);
   PX.propClassList.Add(cl02);
 
+  PX.FpropSomeInterface.setFloat(2.59);
+
+  var intf01: ISomeInterface:= TInterfacedClass.Create();
+  intf01.setFloat(7.56);
+  var intf02: ISomeInterface:= TInterfacedClass.Create();
+  intf02.setFloat(1.9);
+  // TODO can serialize but cannot deserialize due to missing info about concrete class
+  PX.propSomeInterfaceList.add(intf01);
+  PX.propSomeInterfaceList.add(intf02);
+
 
 //  for var j:integer := 0 to 3 do
 //  begin
@@ -332,11 +364,23 @@ end;
 procedure TfMain.bLoadFromFileClick(Sender: TObject);
 begin
   FreeAndNil(PX);
+  // You *must* instantiate concrete types in order to read xml data to put into interfaces
   PX := TMyXML.Create;
 
   TOmniXMLReader.LoadFromFile(PX, DocPath + 'storage_PX.xml');
   TOmniXMLWriter.SaveToFile(PX, DocPath + 'storage_PX_resaved.xml', TOutputFormat(rgOutputFormat.ItemIndex));
 end;
+
+
+function TInterfacedClass.getFloat(): double;
+begin
+  result:= self.Ffloat;
+end;
+procedure TInterfacedClass.setFloat(theFloat: double);
+begin
+  self.Ffloat:= theFloat;
+end;
+
 
 initialization
   RegisterClass(TChildClass);

@@ -1,4 +1,4 @@
-(*******************************************************************************
+﻿(*******************************************************************************
 * The contents of this file are subject to the Mozilla Public License Version  *
 * 1.1 (the "License"); you may not use this file except in compliance with the *
 * License. You may obtain a copy of the License at http://www.mozilla.org/MPL/ *
@@ -37,6 +37,8 @@ uses
 {$IFDEF USE_MSXML} OmniXML_MSXML, {$ENDIF}
   System.Rtti,
   System.Generics.Collections,
+  Spring.Collections,
+  Spring.Collections.Lists,
   PropFormatAttributeUnit,
   ElementNameAttributeUnit,
   OmniXMLUtils;
@@ -59,6 +61,7 @@ type TOmnyXMLUtil = class
   public function GetElementCustomName(Instance: TObject; PropInfo: PPropInfo): string;
   public function GetRootName(Instance: TObject): string;
   public function GetSubTypeItemClassFromList(ObjectList: TObject): TClass;
+  public function GetSubInstanceTypeItemClassFromList(objectList: IList<IInterface>): TClass;
 end;
 
 
@@ -328,6 +331,34 @@ begin
 end;
 
 
+function TOmnyXMLUtil.GetSubInstanceTypeItemClassFromList(objectList: IList<IInterface>): TClass;
+var
+  ctxRtti  : TRttiContext;
+  typeRtti : TRttiType;
+  atrbRtti : TCustomAttribute;
+  methodRtti: TRttiMethod;
+  parameterRtti: TRttiParameter;
+begin
+  result := nil;
+
+  ctxRtti  := TRttiContext.Create;
+  typeRtti := ctxRtti.GetType( ObjectList.AsObject.ClassType );
+  methodRtti := typeRtti.GetMethod('Add');
+  for parameterRtti in methodRtti.GetParameters do
+  begin
+    if SameText(parameterRtti.Name,'item') then
+    begin
+      if parameterRtti.ParamType.IsInstance then
+      begin
+        result := parameterRtti.ParamType.AsInstance.MetaclassType;
+      end;
+      break;
+    end;
+  end;
+  ctxRtti.Free;
+end;
+
+
 procedure TOmniXMLWriter.WriteCollection(Collection: TCollection; Root: IXMLElement);
 var
   i: Integer;
@@ -468,6 +499,71 @@ var
 
   end;
 
+  procedure WriteInterfaceProp;
+  var
+    Value: TObject;
+    ValueIntf: IInterface;
+    PropNode: IXMLElement;
+
+    procedure WriteStrings(const Strings: TStrings);
+    var
+      i: Integer;
+    begin
+      SetNodeAttrInt(PropNode, StringS_COUNT_NODENAME, Strings.Count);
+      for i := 0 to Strings.Count - 1 do begin
+        if Strings[i] <> '' then
+          InternalWriteText(PropNode, StringS_PREFIX + IntToStr(i), Strings[i], PropFormat);
+      end;
+    end;
+
+  begin
+    var ctx: TRttiContext := TRttiContext.Create();
+    var objType: TRttiType:= ctx.GetType(Instance.ClassInfo);
+    var p:TRttiProperty:= objType.GetProperty(PropInfo.Name);
+    var tval: TValue:= p.GetValue(Instance);
+    ValueIntf := tval.AsInterface;
+    Value:= TObject(ValueIntf);
+
+    if (Value <> nil) then
+    begin
+        if (Value is TInterfacedPersistent) then
+        begin
+          PropNode := Doc.CreateElement(Name);
+
+          // write object's properties
+          Write(TPersistent(Value), PropNode, False, True, WriteDefaultValues);
+          if Value is TCollection then begin
+            WriteCollection(TCollection(Value), PropNode);
+            if not IsElementEmpty(PropNode) then
+              Element.AppendChild(PropNode);
+          end
+          else if Value is TStrings then begin
+            WriteStrings(TStrings(Value));
+            Element.AppendChild(PropNode);
+          end
+          else if not IsElementEmpty(PropNode) then
+            Element.AppendChild(PropNode);
+        end
+        else if (Value.ClassName.StartsWith('TFoldedList<System.IInterface>')) then      // IList -> TFoldedList TODO ugly
+        begin
+          // write a xml tag for every occurrence
+          var ValueList:= TFoldedList<System.IInterface>(valueIntf);
+          for var i:integer := 0 to ValueList.Count-1 do
+          begin
+            var PropNodeX: IXMLElement := Doc.CreateElement(Name);
+            Write(TInterfacedPersistent(ValueList.Items[i]), PropNodeX, False, True, WriteDefaultValues);
+            Element.AppendChild(PropNodeX);
+          end;
+
+        end;
+      end;
+
+
+
+
+  end;
+
+
 begin
   if (PPropInfo(PropInfo)^.GetProc <> nil) then begin
     PropType := {$IFDEF FPC}@{$ENDIF}PPropInfo(PropInfo).PropType{$IFNDEF FPC}^{$ENDIF};
@@ -486,6 +582,7 @@ begin
           WriteFloatProp;
       tkInt64: WriteInt64Prop;
       tkClass: WriteObjectProp;
+      tkInterface: WriteInterfaceProp;
     end;
     util.Free();
   end;
@@ -863,11 +960,10 @@ var
           ReadCollection(TCollection(Value), PropNode)
         else if Value is TStrings then
           ReadStrings(TStrings(Value));
-      end;
-
+      end
+      else
       if (Value.ClassName.StartsWith('TObjectList<')) then // TODO ugly
       begin
-        // TODO matrix not supported
         var ValueList: TObjectList<TPersistent> := TObjectList<TPersistent>(Value);
         var PropNodeList: TList<IXMLElement> := FindAllElements(Element, Name);
 
@@ -886,6 +982,68 @@ var
 
     end;
   end;
+
+  procedure ReadInterfaceProp;
+  var
+    Value: TObject;
+    ValueIntf: IInterface;
+    PropNode: IXMLElement;
+
+    procedure ReadStrings(const Strings: TStrings);
+    var
+      i: Integer;
+      Count: Integer;
+      Value: XmlString;
+    begin
+      Strings.Clear;
+
+      Count := GetNodeAttrInt(PropNode, StringS_COUNT_NODENAME, 0);
+      for i := 0 to Count - 1 do
+        Strings.Add('');
+
+      for i := 0 to Strings.Count - 1 do begin
+        if InternalReadText(PropNode, StringS_PREFIX + IntToStr(i), Value, PropFormat) then
+          Strings[i] := Value;
+      end;
+    end;
+  begin
+    var ctx: TRttiContext := TRttiContext.Create();
+    var objType: TRttiType:= ctx.GetType(Instance.ClassInfo);
+    var p:TRttiProperty:= objType.GetProperty(PPropInfo(PropInfo)^.Name);
+    var tval: TValue:= p.GetValue(Instance);
+    ValueIntf := tval.AsInterface;
+    Value:= TObject(ValueIntf);
+    if (Value <> nil) then
+    begin
+		// even if it is an interface I can deserialize because I've instantitated concrete type before reading xml
+      if (Value is TInterfacedPersistent) then
+      begin
+        PropNode := FindElement(Element, Name);
+        Read(TInterfacedPersistent(Value), PropNode);
+        if Value is TCollection then
+          ReadCollection(TCollection(Value), PropNode)
+        else if Value is TStrings then
+          ReadStrings(TStrings(Value));
+      end
+      else
+      if (Value.ClassName.StartsWith('TFoldedList<System.IInterface>')) then // TODO ugly
+      begin
+        var ValueList:= TFoldedList<System.IInterface>(valueIntf);
+        var PropNodeList: TList<IXMLElement> := FindAllElements(Element, Name);
+
+        var util: TOmnyXMLUtil:= TOmnyXMLUtil.Create();
+
+        for var i:integer := 0 to PropNodeList.Count-1 do
+        begin
+          PropNode:= PropNodeList[i];
+			// TODO cannot deserialize due to missing info about concrete class	
+        end;
+        util.Free();
+      end;
+
+    end;
+  end;
+
 
 begin
   PropType := PPropInfo(PropInfo)^.PropType^;
@@ -908,6 +1066,7 @@ begin
           ReadFloatProp;
       tkInt64: ReadInt64Prop;
       tkClass: ReadObjectProp;
+      tkInterface: ReadInterfaceProp;
     end;
   end;
 end;
